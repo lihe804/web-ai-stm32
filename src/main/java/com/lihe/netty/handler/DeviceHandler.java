@@ -50,6 +50,14 @@ public class DeviceHandler extends SimpleChannelInboundHandler<String> {
                 return;
             }
             
+            // 处理阈值设置确认消息
+            if ("threshold_ack".equals(type)) {
+                String sensor = jsonNode.has("sensor") ? jsonNode.get("sensor").asText() : "unknown";
+                double value = jsonNode.has("value") ? jsonNode.get("value").asDouble() : 0;
+                log.info("收到设备阈值设置确认: device={}, sensor={}, value={}", deviceId, sensor, value);
+                return;
+            }
+            
             // 处理设备数据消息
             DeviceData data = mapper.readValue(msg, DeviceData.class);
             

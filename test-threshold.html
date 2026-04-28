@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>动态阈值调整测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .sensor-card {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        .sensor-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #495057;
+        }
+        .threshold-display {
+            font-size: 16px;
+            margin: 10px 0;
+            padding: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+        }
+        .slider-container {
+            margin: 15px 0;
+        }
+        input[type="range"] {
+            width: 100%;
+            margin: 10px 0;
+        }
+        .value-display {
+            text-align: center;
+            font-size: 14px;
+            color: #6c757d;
+        }
+        .log {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 10px;
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin: 2px 0;
+            padding: 2px 5px;
+        }
+        .log-info {
+            color: #0066cc;
+        }
+        .log-success {
+            color: #28a745;
+        }
+        .log-error {
+            color: #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌡️ 动态阈值调整测试</h1>
+        
+        <div id="status" class="status disconnected">
+            WebSocket未连接
+        </div>
+
+        <div class="sensor-card">
+            <div class="sensor-title">🌡️ 温度传感器</div>
+            <div class="threshold-display">
+                报警阈值: > <span id="temp-threshold">35</span>°C
+            </div>
+            <div class="slider-container">
+                <input type="range" id="temp-slider" min="0" max="50" value="35" step="0.5">
+                <div class="value-display">当前值: <span id="temp-value">35</span>°C</div>
+            </div>
+        </div>
+
+        <div class="sensor-card">
+            <div class="sensor-title">💧 湿度传感器</div>
+            <div class="threshold-display">
+                报警阈值: > <span id="hum-threshold">90</span>%
+            </div>
+            <div class="slider-container">
+                <input type="range" id="hum-slider" min="0" max="100" value="90" step="1">
+                <div class="value-display">当前值: <span id="hum-value">90</span>%</div>
+            </div>
+        </div>
+
+        <div class="sensor-card">
+            <div class="sensor-title">☀️ 光照传感器</div>
+            <div class="threshold-display">
+                报警阈值: > <span id="light-threshold">1000</span>lux
+            </div>
+            <div class="slider-container">
+                <input type="range" id="light-slider" min="0" max="2000" value="1000" step="10">
+                <div class="value-display">当前值: <span id="light-value">1000</span>lux</div>
+            </div>
+        </div>
+
+        <div class="sensor-card">
+            <div class="sensor-title">🌱 土壤湿度传感器</div>
+            <div class="threshold-display">
+                报警阈值: < <span id="soil-threshold">30</span>%
+            </div>
+            <div class="slider-container">
+                <input type="range" id="soil-slider" min="0" max="100" value="30" step="1">
+                <div class="value-display">当前值: <span id="soil-value">30</span>%</div>
+            </div>
+        </div>
+
+        <div class="log" id="log">
+            <div class="log-entry log-info">日志将显示在这里...</div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        const deviceId = 'stm32_001'; // 设备ID
+        
+        // 日志函数
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        // 连接WebSocket
+        function connectWebSocket() {
+            const statusDiv = document.getElementById('status');
+            
+            try {
+                ws = new WebSocket('ws://localhost:8080/ws');
+                
+                ws.onopen = function() {
+                    statusDiv.className = 'status connected';
+                    statusDiv.textContent = 'WebSocket已连接';
+                    log('WebSocket连接成功', 'success');
+                };
+                
+                ws.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        log(`收到消息: ${JSON.stringify(data)}`, 'info');
+                        
+                        // 处理阈值确认消息
+                        if (data.type === 'threshold_ack' && data.success) {
+                            updateThresholdDisplay(data.sensor, data.value);
+                            log(`阈值更新成功: ${data.sensor} = ${data.value}`, 'success');
+                        }
+                    } catch (e) {
+                        log(`消息解析错误: ${e.message}`, 'error');
+                    }
+                };
+                
+                ws.onclose = function() {
+                    statusDiv.className = 'status disconnected';
+                    statusDiv.textContent = 'WebSocket已断开';
+                    log('WebSocket连接断开', 'error');
+                    
+                    // 5秒后重连
+                    setTimeout(connectWebSocket, 5000);
+                };
+                
+                ws.onerror = function(error) {
+                    log(`WebSocket错误: ${error}`, 'error');
+                };
+                
+            } catch (e) {
+                log(`连接失败: ${e.message}`, 'error');
+                statusDiv.className = 'status disconnected';
+                statusDiv.textContent = '连接失败';
+            }
+        }
+        
+        // 发送阈值更新请求
+        function sendThresholdUpdate(sensor, value) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const message = {
+                    type: 'threshold',
+                    deviceId: deviceId,
+                    sensor: sensor,
+                    value: parseFloat(value)
+                };
+                
+                ws.send(JSON.stringify(message));
+                log(`发送阈值更新: ${sensor} = ${value}`, 'info');
+            } else {
+                log('WebSocket未连接，无法发送消息', 'error');
+            }
+        }
+        
+        // 更新阈值显示
+        function updateThresholdDisplay(sensor, value) {
+            const thresholdSpan = document.getElementById(`${sensor}-threshold`);
+            if (thresholdSpan) {
+                thresholdSpan.textContent = value;
+            }
+        }
+        
+        // 初始化滑块事件
+        function initSliders() {
+            const sensors = ['temp', 'hum', 'light', 'soil'];
+            
+            sensors.forEach(sensor => {
+                const slider = document.getElementById(`${sensor}-slider`);
+                const valueSpan = document.getElementById(`${sensor}-value`);
+                
+                // 实时更新显示值
+                slider.addEventListener('input', function() {
+                    valueSpan.textContent = this.value;
+                });
+                
+                // 松开鼠标后发送更新请求
+                slider.addEventListener('change', function() {
+                    sendThresholdUpdate(sensor, this.value);
+                });
+            });
+        }
+        
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            initSliders();
+            connectWebSocket();
+        });
+    </script>
+</body>
+</html>

@@ -1,22 +1,99 @@
 package com.lihe.websocket;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lihe.netty.session.DeviceSessionManager;
+import com.lihe.service.alarm.AlarmService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
+import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+@Component
 public class WebSocketServer extends TextWebSocketHandler {
     private static final Logger log = LoggerFactory.getLogger(WebSocketServer.class);
     private static final CopyOnWriteArrayList<WebSocketSession> sessions = new CopyOnWriteArrayList<>();
     private static final ObjectMapper objectMapper = new ObjectMapper();
+    
+    @Autowired
+    private AlarmService alarmService;
+    
+    @PostConstruct
+    public void init() {
+        // 初始化时可以加载默认阈值配置
+        log.info("WebSocket服务器初始化完成");
+    }
+
+    @Override
+    public void handleTextMessage(WebSocketSession session, TextMessage message) {
+        try {
+            String payload = message.getPayload();
+            log.info("收到WebSocket消息: {}", payload);
+            
+            JsonNode jsonNode = objectMapper.readTree(payload);
+            String type = jsonNode.has("type") ? jsonNode.get("type").asText() : null;
+            
+            if ("threshold".equals(type)) {
+                handleThresholdUpdate(jsonNode, session);
+            } else {
+                log.warn("未知的消息类型: {}", type);
+            }
+        } catch (Exception e) {
+            log.error("处理WebSocket消息失败: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * 处理阈值更新请求
+     */
+    private void handleThresholdUpdate(JsonNode jsonNode, WebSocketSession session) {
+        try {
+            String deviceId = jsonNode.has("deviceId") ? jsonNode.get("deviceId").asText() : null;
+            String sensor = jsonNode.has("sensor") ? jsonNode.get("sensor").asText() : null;
+            double value = jsonNode.has("value") ? jsonNode.get("value").asDouble() : 0;
+            
+            if (deviceId == null || sensor == null) {
+                log.warn("阈值更新请求参数不完整");
+                return;
+            }
+            
+            log.info("收到阈值修改:\ndevice={}\nsensor={}\nvalue={}", deviceId, sensor, value);
+            
+            // 更新报警服务中的阈值
+            alarmService.setThreshold(sensor, value);
+            
+            // 构造TCP命令发送给STM32
+            String tcpCommand = String.format("SET_THRESHOLD %s %.1f", sensor, value);
+            log.info("发送TCP命令:\n{}", tcpCommand);
+            
+            // 通过Netty发送命令到STM32设备
+            DeviceSessionManager.sendMessage(deviceId, tcpCommand);
+            
+            // 向前端发送确认消息
+            Map<String, Object> response = new HashMap<>();
+            response.put("type", "threshold_ack");
+            response.put("deviceId", deviceId);
+            response.put("sensor", sensor);
+            response.put("value", value);
+            response.put("success", true);
+            
+            String jsonResponse = objectMapper.writeValueAsString(response);
+            session.sendMessage(new TextMessage(jsonResponse));
+            
+        } catch (Exception e) {
+            log.error("处理阈值更新失败: {}", e.getMessage(), e);
+        }
+    }
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {

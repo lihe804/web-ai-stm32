@@ -1019,6 +1019,166 @@ echo '{"deviceId":"test_001","temp":25.5,"humidity":60}' | nc localhost 9000
 
 ---
 
+## 🎯 动态阈值调整接口
+
+### WebSocket 请求协议
+
+前端通过WebSocket发送阈值修改请求：
+
+**请求格式:**
+```json
+{
+  "type": "threshold",
+  "deviceId": "stm32_001",
+  "sensor": "temp",
+  "value": 38
+}
+```
+
+**字段说明:**
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| type | string | 固定为 "threshold" |
+| deviceId | string | 设备ID |
+| sensor | string | 传感器类型: temp/hum/light/soil |
+| value | number | 阈值数值 |
+
+**支持的传感器类型:**
+| sensor | 含义 | 默认阈值 | 报警规则 |
+|--------|------|----------|----------|
+| temp | 温度 | 35.0°C | 超过阈值报警 |
+| hum | 湿度 | 90.0% | 超过阈值报警 |
+| light | 光照 | 1000.0lux | 超过阈值报警 |
+| soil | 土壤湿度 | 30.0% | 低于阈值报警 |
+
+**响应格式:**
+```json
+{
+  "type": "threshold_ack",
+  "deviceId": "stm32_001",
+  "sensor": "temp",
+  "value": 38,
+  "success": true
+}
+```
+
+### TCP转发协议
+
+后端收到WebSocket请求后，会转换为TCP命令发送给STM32：
+
+**TCP命令格式:**
+```
+SET_THRESHOLD temp 38.0
+```
+
+**命令说明:**
+- `SET_THRESHOLD` - 固定命令头
+- `temp` - 传感器类型 (temp/hum/light/soil)
+- `38.0` - 阈值数值（保留一位小数）
+
+### STM32行为
+
+STM32收到命令后实时更新阈值：
+
+```c
+// 示例：收到 SET_THRESHOLD temp 38.0
+if (strcmp(command, "SET_THRESHOLD") == 0) {
+    char sensor[10];
+    float value;
+    sscanf(params, "%s %f", sensor, &value);
+    
+    if (strcmp(sensor, "temp") == 0) {
+        temp_threshold = value;
+    } else if (strcmp(sensor, "hum") == 0) {
+        hum_threshold = value;
+    } else if (strcmp(sensor, "light") == 0) {
+        light_threshold = value;
+    } else if (strcmp(sensor, "soil") == 0) {
+        soil_threshold = value;
+    }
+}
+```
+
+### 后端日志示例
+
+**收到阈值修改时:**
+```
+收到阈值修改:
+device=stm32_001
+sensor=temp
+value=38.0
+```
+
+**发送TCP命令时:**
+```
+发送TCP命令:
+SET_THRESHOLD temp 38.0
+```
+
+**设置成功时:**
+```
+设置温度阈值为: 38.0
+```
+
+### 前端交互要求
+
+每个传感器卡片底部添加滑块：
+
+**拖动时:**
+- 实时更新阈值显示数值
+- 不发送请求
+
+**松开鼠标后:**
+- 发送WebSocket阈值更新请求
+- 等待后端确认
+- 显示更新结果
+
+### UI显示示例
+
+**温度卡片:**
+```
+🌡️ 温度传感器
+报警阈值: >35°C
+[====|=====] 滑块
+当前值: 35°C
+```
+
+**湿度卡片:**
+```
+💧 湿度传感器
+报警阈值: >90%
+[====|=====] 滑块
+当前值: 90%
+```
+
+**光照卡片:**
+```
+☀️ 光照传感器
+报警阈值: >1000lux
+[====|=====] 滑块
+当前值: 1000lux
+```
+
+**土壤湿度卡片:**
+```
+🌱 土壤湿度传感器
+报警阈值: <30%
+[====|=====] 滑块
+当前值: 30%
+```
+
+### 测试页面
+
+项目根目录提供了测试页面：`test-threshold.html`
+
+**使用方法:**
+1. 启动后端服务
+2. 在浏览器中打开 `test-threshold.html`
+3. 拖动滑块调整阈值
+4. 观察日志和控制台输出
+
+---
+
 ## 📞 技术支持
 
 如有问题，请检查：
@@ -1032,6 +1192,6 @@ echo '{"deviceId":"test_001","temp":25.5,"humidity":60}' | nc localhost 9000
 
 ---
 
-**文档版本:** v1.0  
-**更新日期:** 2026-04-27  
-**适用版本:** web-ai-stm32 v2.0
+**文档版本:** v1.1  
+**更新日期:** 2026-04-28  
+**适用版本:** web-ai-stm32 v2.1

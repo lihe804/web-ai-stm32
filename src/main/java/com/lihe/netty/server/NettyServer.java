@@ -53,7 +53,8 @@ public class NettyServer {
                             // 字符串编码器（用于发送数据给设备）
                             pipeline.addLast(new StringEncoder());
                             // 解决TCP粘包问题，使用换行符作为分隔符（用于接收数据）
-                            pipeline.addLast(new DelimiterBasedFrameDecoder(1024, Unpooled.wrappedBuffer("\n".getBytes())));
+                            // 最大帧长度设置为8192字节，支持更长的JSON数据
+                            pipeline.addLast(new DelimiterBasedFrameDecoder(8192, Unpooled.wrappedBuffer("\n".getBytes())));
                             // 字符串解码器
                             pipeline.addLast(new StringDecoder());
                             // 自定义业务处理器，注入依赖
